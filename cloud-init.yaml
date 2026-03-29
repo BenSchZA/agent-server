@@ -10,6 +10,9 @@ packages:
   - curl
   - jq
   - unattended-upgrades
+  - git
+  - unzip
+  - tmux
 
 users:
   - name: deploy
@@ -17,6 +20,8 @@ users:
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
 
 write_files:
   - path: /etc/wireguard/wg0.conf
@@ -53,7 +58,7 @@ write_files:
       X11Forwarding no
       AllowTcpForwarding no
       MaxAuthTries 3
-      ListenAddress ${wg_server_address}
+      ListenAddress ${split("/", wg_server_address)[0]}
 
   - path: /home/deploy/docker-compose.yaml
     permissions: "0644"
@@ -79,6 +84,35 @@ write_files:
     content: |
       net.ipv4.ip_forward = 1
 
+  # Telegram bot token for Claude plugin
+  - path: /home/deploy/.claude/channels/telegram/.env
+    permissions: "0600"
+    content: |
+      TELEGRAM_BOT_TOKEN=${telegram_bot_token}
+
+  # Systemd service for Claude with Telegram channel
+  - path: /etc/systemd/system/claude.service
+    content: |
+      [Unit]
+      Description=Claude Code with Telegram channel
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=forking
+      User=deploy
+      Group=deploy
+      WorkingDirectory=/home/deploy
+      ExecStart=/usr/bin/tmux new-session -d -s claude "/home/deploy/.local/bin/claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official"
+      ExecStop=/usr/bin/tmux kill-session -t claude
+      Restart=on-failure
+      RestartSec=10
+      Environment=HOME=/home/deploy
+      Environment=PATH=/home/deploy/.local/bin:/home/deploy/.bun/bin:/usr/local/bin:/usr/bin:/bin
+
+      [Install]
+      WantedBy=multi-user.target
+
 runcmd:
   # Enable IP forwarding
   - sysctl -p /etc/sysctl.d/99-wireguard.conf
@@ -91,6 +125,7 @@ runcmd:
   - ufw default deny incoming
   - ufw default allow outgoing
   - ufw allow 51820/udp
+  - ufw allow in on wg0 to any port 22 proto tcp
   - ufw --force enable
 
   # Install Docker via official script
@@ -106,8 +141,27 @@ runcmd:
   # Install docker compose plugin
   - apt-get install -y docker-compose-plugin
 
-  # Fix ownership of deploy home
+  # Fix ownership of deploy home (must happen before deploy user installs)
   - chown -R deploy:deploy /home/deploy
+
+  # Install Claude Code (native installer, auto-updates)
+  - su - deploy -c "curl -fsSL https://claude.ai/install.sh | bash"
+  # Install nvm, Node.js 22 and npm as deploy user
+  - su - deploy -c "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash"
+  - su - deploy -c "source ~/.nvm/nvm.sh && nvm install 22"
+
+  # Install Bun as deploy user (required for Telegram plugin)
+  - su - deploy -c "curl -fsSL https://bun.sh/install | bash"
+
+  # Ensure PATH includes claude, bun, and nvm for interactive shells
+  - su - deploy -c "echo 'export PATH=\"\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH\"' >> ~/.bashrc"
+
+  # Fix ownership again after installs
+  - chown -R deploy:deploy /home/deploy
+
+  # Enable Claude Telegram service (start manually after OAuth login)
+  - systemctl daemon-reload
+  - systemctl enable claude.service
 
   # Start fail2ban
   - systemctl enable fail2ban

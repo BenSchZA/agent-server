@@ -12,8 +12,13 @@ provider "hcloud" {
   token = var.hcloud_token
 }
 
+resource "hcloud_ssh_key" "deploy" {
+  name       = "${var.server_name}-deploy"
+  public_key = var.ssh_public_key
+}
+
 resource "hcloud_firewall" "server" {
-  name = "agent-server-fw"
+  name = "${var.server_name}-fw"
 
   # WireGuard UDP
   rule {
@@ -46,16 +51,19 @@ resource "hcloud_firewall" "server" {
 }
 
 resource "hcloud_server" "agent" {
-  name        = "agent-server"
+  name        = var.server_name
   server_type = "cax11"
   image       = "ubuntu-24.04"
   location    = "nbg1"
   firewall_ids = [hcloud_firewall.server.id]
+  ssh_keys     = [hcloud_ssh_key.deploy.id]
 
   user_data = templatefile("${path.module}/cloud-init.yaml", {
     wg_server_private_key = var.wg_server_private_key
     wg_server_address     = var.wg_server_address
     wg_client_public_key  = var.wg_client_public_key
     wg_client_allowed_ip  = var.wg_client_allowed_ip
+    telegram_bot_token    = var.telegram_bot_token
+    ssh_public_key        = var.ssh_public_key
   })
 }

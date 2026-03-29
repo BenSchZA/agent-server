@@ -1,7 +1,18 @@
+variable "server_name" {
+  description = "Name used for server, firewall, and SSH key resources"
+  type        = string
+  default     = "agent"
+}
+
 variable "hcloud_token" {
   description = "Hetzner Cloud API token"
   type        = string
   sensitive   = true
+}
+
+variable "ssh_public_key" {
+  description = "SSH public key for the deploy user"
+  type        = string
 }
 
 variable "wg_server_private_key" {
@@ -25,4 +36,10 @@ variable "wg_client_allowed_ip" {
   description = "WireGuard client allowed IP"
   type        = string
   default     = "10.0.0.2/32"
+}
+
+variable "telegram_bot_token" {
+  description = "Telegram bot token from BotFather"
+  type        = string
+  sensitive   = true
 }
