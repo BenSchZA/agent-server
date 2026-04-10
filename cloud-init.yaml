@@ -90,6 +90,20 @@ write_files:
     content: |
       TELEGRAM_BOT_TOKEN=${telegram_bot_token}
 
+  # Pre-accept the folder-trust dialog for /home/deploy so Claude Code
+  # doesn't block on the "trust this folder" prompt at first run.
+  # Claude merges this with its own state on startup.
+  - path: /home/deploy/.claude.json
+    permissions: "0600"
+    content: |
+      {
+        "projects": {
+          "/home/deploy": {
+            "hasTrustDialogAccepted": true
+          }
+        }
+      }
+
   # Systemd service for Claude with Telegram channel
   - path: /etc/systemd/system/claude.service
     content: |
