@@ -127,6 +127,11 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+swap:
+  filename: /swapfile
+  size: 4294967296
+  maxsize: 4294967296
+
 runcmd:
   # Enable IP forwarding
   - sysctl -p /etc/sysctl.d/99-wireguard.conf

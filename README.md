@@ -188,7 +188,7 @@ Configure SSH to use it for GitHub:
 cat >> ~/.ssh/config << 'EOF'
 Host github.com
   IdentityFile ~/.ssh/id_github
-  IdentitiesOnly yes
+  IdentitiesOnly no
 EOF
 ```
 
