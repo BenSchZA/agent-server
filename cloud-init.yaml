@@ -4,191 +4,194 @@ package_update: true
 package_upgrade: true
 
 packages:
-  - wireguard
-  - fail2ban
-  - ufw
-  - curl
-  - jq
-  - unattended-upgrades
-  - git
-  - unzip
-  - tmux
+    - wireguard
+    - fail2ban
+    - ufw
+    - curl
+    - jq
+    - unattended-upgrades
+    - git
+    - unzip
+    - tmux
+    - mosh
 
 users:
-  - name: deploy
-    groups: docker
-    shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    lock_passwd: true
-    ssh_authorized_keys:
-      - ${ssh_public_key}
+    - name: deploy
+      groups: docker
+      shell: /bin/bash
+      sudo: ALL=(ALL) NOPASSWD:ALL
+      lock_passwd: true
+      ssh_authorized_keys:
+          - ${ssh_public_key}
 
 write_files:
-  - path: /etc/wireguard/wg0.conf
-    permissions: "0600"
-    content: |
-      [Interface]
-      PrivateKey = ${wg_server_private_key}
-      Address = ${wg_server_address}
-      ListenPort = 51820
+    - path: /etc/wireguard/wg0.conf
+      permissions: "0600"
+      content: |
+          [Interface]
+          PrivateKey = ${wg_server_private_key}
+          Address = ${wg_server_address}
+          ListenPort = 51820
 
-      [Peer]
-      PublicKey = ${wg_client_public_key}
-      AllowedIPs = ${wg_client_allowed_ip}
+          [Peer]
+          PublicKey = ${wg_client_public_key}
+          AllowedIPs = ${wg_client_allowed_ip}
 
-  - path: /etc/fail2ban/jail.local
-    content: |
-      [DEFAULT]
-      bantime = 3600
-      findtime = 600
-      maxretry = 3
-      backend = systemd
+    - path: /etc/fail2ban/jail.local
+      content: |
+          [DEFAULT]
+          bantime = 3600
+          findtime = 600
+          maxretry = 3
+          backend = systemd
 
-      [sshd]
-      enabled = true
-      port = ssh
-      filter = sshd
-      maxretry = 3
+          [sshd]
+          enabled = true
+          port = ssh
+          filter = sshd
+          maxretry = 3
 
-  - path: /etc/ssh/sshd_config.d/99-hardened.conf
-    content: |
-      PermitRootLogin no
-      PasswordAuthentication no
-      PubkeyAuthentication yes
-      X11Forwarding no
-      AllowTcpForwarding no
-      MaxAuthTries 3
-      ListenAddress ${split("/", wg_server_address)[0]}
+    - path: /etc/ssh/sshd_config.d/99-hardened.conf
+      content: |
+          PermitRootLogin no
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          X11Forwarding no
+          AllowTcpForwarding no
+          MaxAuthTries 3
+          ListenAddress ${split("/", wg_server_address)[0]}
 
-  - path: /home/deploy/docker-compose.yaml
-    permissions: "0644"
-    content: |
-      services:
-        cloudflared:
-          image: cloudflare/cloudflared:latest
-          container_name: cloudflared
-          restart: unless-stopped
-          command: tunnel run
-          environment:
-            - TUNNEL_TOKEN=$${CLOUDFLARE_TUNNEL_TOKEN}
-          env_file:
-            - .env
-          network_mode: host
+    - path: /home/deploy/docker-compose.yaml
+      permissions: "0644"
+      content: |
+          services:
+            cloudflared:
+              image: cloudflare/cloudflared:latest
+              container_name: cloudflared
+              restart: unless-stopped
+              command: tunnel run
+              environment:
+                - TUNNEL_TOKEN=$${CLOUDFLARE_TUNNEL_TOKEN}
+              env_file:
+                - .env
+              network_mode: host
 
-  - path: /home/deploy/.env.example
-    permissions: "0644"
-    content: |
-      CLOUDFLARE_TUNNEL_TOKEN=your-cloudflare-tunnel-token
+    - path: /home/deploy/.env.example
+      permissions: "0644"
+      content: |
+          CLOUDFLARE_TUNNEL_TOKEN=your-cloudflare-tunnel-token
 
-  - path: /etc/sysctl.d/99-wireguard.conf
-    content: |
-      net.ipv4.ip_forward = 1
+    - path: /etc/sysctl.d/99-wireguard.conf
+      content: |
+          net.ipv4.ip_forward = 1
 
-  # Telegram bot token for Claude plugin
-  - path: /home/deploy/.claude/channels/telegram/.env
-    permissions: "0600"
-    content: |
-      TELEGRAM_BOT_TOKEN=${telegram_bot_token}
+    # Telegram bot token for Claude plugin
+    - path: /home/deploy/.claude/channels/telegram/.env
+      permissions: "0600"
+      content: |
+          TELEGRAM_BOT_TOKEN=${telegram_bot_token}
 
-  # Pre-accept the folder-trust dialog for /home/deploy so Claude Code
-  # doesn't block on the "trust this folder" prompt at first run.
-  # Claude merges this with its own state on startup.
-  - path: /home/deploy/.claude.json
-    permissions: "0600"
-    content: |
-      {
-        "projects": {
-          "/home/deploy": {
-            "hasTrustDialogAccepted": true
+    # Pre-accept the folder-trust dialog for /home/deploy so Claude Code
+    # doesn't block on the "trust this folder" prompt at first run.
+    # Claude merges this with its own state on startup.
+    - path: /home/deploy/.claude.json
+      permissions: "0600"
+      content: |
+          {
+            "projects": {
+              "/home/deploy": {
+                "hasTrustDialogAccepted": true
+              }
+            }
           }
-        }
-      }
 
-  # Systemd service for Claude with Telegram channel
-  - path: /etc/systemd/system/claude.service
-    content: |
-      [Unit]
-      Description=Claude Code with Telegram channel
-      After=network-online.target
-      Wants=network-online.target
+    # Systemd service for Claude with Telegram channel
+    - path: /etc/systemd/system/claude.service
+      content: |
+          [Unit]
+          Description=Claude Code with Telegram channel
+          After=network-online.target
+          Wants=network-online.target
 
-      [Service]
-      Type=forking
-      User=deploy
-      Group=deploy
-      WorkingDirectory=/home/deploy
-      ExecStart=/usr/bin/tmux new-session -d -s claude "/home/deploy/.local/bin/claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official"
-      ExecStop=/usr/bin/tmux kill-session -t claude
-      Restart=on-failure
-      RestartSec=10
-      Environment=HOME=/home/deploy
-      Environment=PATH=/home/deploy/.local/bin:/home/deploy/.bun/bin:/usr/local/bin:/usr/bin:/bin
+          [Service]
+          Type=forking
+          User=deploy
+          Group=deploy
+          WorkingDirectory=/home/deploy
+          ExecStart=/usr/bin/tmux new-session -d -s claude "/home/deploy/.local/bin/claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official"
+          ExecStop=/usr/bin/tmux kill-session -t claude
+          Restart=on-failure
+          RestartSec=10
+          Environment=HOME=/home/deploy
+          Environment=PATH=/home/deploy/.local/bin:/home/deploy/.bun/bin:/usr/local/bin:/usr/bin:/bin
 
-      [Install]
-      WantedBy=multi-user.target
+          [Install]
+          WantedBy=multi-user.target
 
 swap:
-  filename: /swapfile
-  size: 4294967296
-  maxsize: 4294967296
+    filename: /swapfile
+    size: 4294967296
+    maxsize: 4294967296
 
 runcmd:
-  # Enable IP forwarding
-  - sysctl -p /etc/sysctl.d/99-wireguard.conf
+    # Enable IP forwarding
+    - sysctl -p /etc/sysctl.d/99-wireguard.conf
 
-  # Start WireGuard
-  - systemctl enable wg-quick@wg0
-  - systemctl start wg-quick@wg0
+    # Start WireGuard
+    - systemctl enable wg-quick@wg0
+    - systemctl start wg-quick@wg0
 
-  # Configure UFW - deny all inbound, allow WireGuard only
-  - ufw default deny incoming
-  - ufw default allow outgoing
-  - ufw allow 51820/udp
-  - ufw allow in on wg0 to any port 22 proto tcp
-  - ufw --force enable
+    # Configure UFW - deny all inbound, allow WireGuard only
+    - ufw default deny incoming
+    - ufw default allow outgoing
+    - ufw allow 51820/udp
+    - ufw allow in on wg0 to any port 22 proto tcp
+    - ufw allow in on wg0 to any port 60000:61000 proto udp
+    - ufw --force enable
 
-  # Install Docker via official script
-  - curl -fsSL https://get.docker.com | sh
+    # Install Docker via official script
+    - curl -fsSL https://get.docker.com | sh
 
-  # Add deploy user to docker group (in case cloud-init order differs)
-  - usermod -aG docker deploy
+    # Add deploy user to docker group (in case cloud-init order differs)
+    - usermod -aG docker deploy
 
-  # Enable and start Docker
-  - systemctl enable docker
-  - systemctl start docker
+    # Enable and start Docker
+    - systemctl enable docker
+    - systemctl start docker
 
-  # Install docker compose plugin
-  - apt-get install -y docker-compose-plugin
+    # Install docker compose plugin
+    - apt-get install -y docker-compose-plugin
 
-  # Fix ownership of deploy home (must happen before deploy user installs)
-  - chown -R deploy:deploy /home/deploy
+    # Fix ownership of deploy home (must happen before deploy user installs)
+    - chown -R deploy:deploy /home/deploy
 
-  # Install Claude Code (native installer, auto-updates)
-  - su - deploy -c "curl -fsSL https://claude.ai/install.sh | bash"
-  # Install nvm, Node.js 22 and npm as deploy user
-  - su - deploy -c "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash"
-  - su - deploy -c "source ~/.nvm/nvm.sh && nvm install 22"
+    # Install Claude Code (native installer, auto-updates)
+    - su - deploy -c "curl -fsSL https://claude.ai/install.sh | bash"
+    # Install nvm, Node.js 22 and npm as deploy user
+    - su - deploy -c "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash"
+    - su - deploy -c "source ~/.nvm/nvm.sh && nvm install 22"
 
-  # Install Bun as deploy user (required for Telegram plugin)
-  - su - deploy -c "curl -fsSL https://bun.sh/install | bash"
+    # Install Bun as deploy user (required for Telegram plugin)
+    - su - deploy -c "curl -fsSL https://bun.sh/install | bash"
+    - ln -sf /home/deploy/.bun/bin/bun /usr/local/bin/bun
 
-  # Ensure PATH includes claude, bun, and nvm for interactive shells
-  - su - deploy -c "echo 'export PATH=\"\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH\"' >> ~/.bashrc"
+    # Ensure PATH includes claude, bun, and nvm for interactive shells
+    - su - deploy -c "echo 'export PATH=\"\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH\"' >> ~/.bashrc"
 
-  # Fix ownership again after installs
-  - chown -R deploy:deploy /home/deploy
+    # Fix ownership again after installs
+    - chown -R deploy:deploy /home/deploy
 
-  # Enable Claude Telegram service (start manually after OAuth login)
-  - systemctl daemon-reload
-  - systemctl enable claude.service
+    - systemctl daemon-reload
+    # Enable Claude Telegram service (start manually after OAuth login)
+    - systemctl enable claude.service
 
-  # Start fail2ban
-  - systemctl enable fail2ban
-  - systemctl start fail2ban
+    # Start fail2ban
+    - systemctl enable fail2ban
+    - systemctl start fail2ban
 
-  # Restart SSH to bind only to WireGuard interface
-  - systemctl restart sshd
+    # Restart SSH to bind only to WireGuard interface
+    - systemctl restart sshd
 
-  # Enable automatic security updates
-  - systemctl enable unattended-upgrades
-  - systemctl start unattended-upgrades
+    # Enable automatic security updates
+    - systemctl enable unattended-upgrades
+    - systemctl start unattended-upgrades
